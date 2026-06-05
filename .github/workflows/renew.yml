@@ -1,18 +1,15 @@
 name: Alwaysdata 每月随机自动续期
-
 on:
   workflow_dispatch: # 支持手动触发
   schedule:
     - cron: '25 7 12 6 *'   # 👈 这个时间每次运行成功后会被脚本自动改写
-
 permissions:
   contents: write
   actions: write
-
 jobs:
   alwaysdata_renew:
     runs-on: ubuntu-latest
-
+    timeout-minutes: 15
     steps:
       - name: 拉取仓库代码
         uses: actions/checkout@v4
@@ -23,24 +20,23 @@ jobs:
           python-version: '3.11'
 
       - name: 安装基础依赖
-        run: |
-          pip install --quiet requests beautifulsoup4
+        run: pip install --quiet requests beautifulsoup4
 
       - name: 执行 Alwaysdata 续期脚本
         env:
           ALWAYSDATA_USER: ${{ secrets.ALWAYSDATA_USER }}
           ALWAYSDATA_PASS: ${{ secrets.ALWAYSDATA_PASS }}
-        run: |
-          python alwaysdata_renew.py
+          TG_BOT_TOKEN:    ${{ secrets.TG_BOT_TOKEN }}
+          TG_CHAT_ID:      ${{ secrets.TG_CHAT_ID }}
+        run: python alwaysdata_renew.py
 
       - name: 🎲 智能计算下个月的随机 Cron 时间
         if: success()
         id: generate_cron
         run: |
-          # 1. 计算下个月是哪个月
           CURRENT_MONTH=$(date +%-m)
           CURRENT_YEAR=$(date +%Y)
-          
+
           if [ "$CURRENT_MONTH" -eq 12 ]; then
             NEXT_MONTH=1
             NEXT_YEAR=$((CURRENT_YEAR + 1))
@@ -49,13 +45,11 @@ jobs:
             NEXT_YEAR=$CURRENT_YEAR
           fi
 
-          # 2. 生成随机分钟 (0-59)、随机小时 (0-23)、随机日期 (1-28，避免二月或大月溢出)
           RANDOM_MIN=$((RANDOM % 60))
           RANDOM_HOUR=$((RANDOM % 24))
           RANDOM_DAY=$((RANDOM % 28 + 1))
-
           NEW_CRON="$RANDOM_MIN $RANDOM_HOUR $RANDOM_DAY $NEXT_MONTH *"
-          
+
           echo "NEW_CRON=$NEW_CRON" >> $GITHUB_OUTPUT
           echo "::notice::🎲 成功为下个月生成随机 Cron: $NEW_CRON (预计在 ${NEXT_YEAR}年${NEXT_MONTH}月${RANDOM_DAY}日 ${RANDOM_HOUR}:${RANDOM_MIN} UTC 运行)"
 
@@ -64,13 +58,18 @@ jobs:
         run: |
           set -e
           NEW_CRON="${{ steps.generate_cron.outputs.NEW_CRON }}"
-          WORKFLOW_FILE=".github/workflows/Alwaysdata_Renew.yml"
+          # ── 修复：使用 GITHUB_WORKSPACE 获取当前工作流文件的绝对路径 ──
+          WORKFLOW_FILE="${GITHUB_WORKSPACE}/.github/workflows/Alwaysdata_Renew.yml"
 
-          # 检出代码到独立目录进行操作，防止并发冲突
-          git clone https://x-access-token:${{ secrets.REPO_TOKEN }}@github.com/${{ github.repository }}.git env_repo
-          cd env_repo
+          # 确认文件存在
+          if [ ! -f "$WORKFLOW_FILE" ]; then
+            echo "::error::找不到工作流文件: $WORKFLOW_FILE"
+            echo "::error::当前目录内容："
+            ls -la "${GITHUB_WORKSPACE}/.github/workflows/" || true
+            exit 1
+          fi
 
-          # 定位到包含 cron: ' 的行号并进行精准替换
+          # 定位 cron 行号并精准替换
           LINE_NUM=$(grep -n "cron: '" "$WORKFLOW_FILE" | head -n1 | cut -d: -f1)
           if [ -z "$LINE_NUM" ]; then
             echo "::error::未在 yml 文件中找到 cron 定义行"
@@ -79,18 +78,18 @@ jobs:
 
           sed -i "${LINE_NUM}c\\    - cron: '$NEW_CRON'   # 👈 这个时间每次运行成功后会被脚本自动改写" "$WORKFLOW_FILE"
 
-          # 检查是否有代码物理变动
+          # 检查是否有物理变动
           if git diff --quiet "$WORKFLOW_FILE"; then
             echo "::notice::Cron 时间无物理变化，无需提交"
             exit 0
           fi
 
-          # 提交更改
-          git config user.name "github-actions[bot]"
+          # 提交并推送（直接在 checkout 的仓库中操作，无需二次 clone）
+          git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
+          git remote set-url origin "https://x-access-token:${{ secrets.REPO_TOKEN }}@github.com/${{ github.repository }}.git"
           git add "$WORKFLOW_FILE"
           git commit -m "🔄 自动打乱排期：更新下月 Alwaysdata 随机 Cron" \
                    -m "新排期表达式: $NEW_CRON"
           git push
-
           echo "::notice::✅ 下个月的随机定时任务已成功推送到仓库中！"
