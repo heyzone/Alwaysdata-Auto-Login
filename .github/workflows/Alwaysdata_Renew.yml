@@ -13,6 +13,10 @@ jobs:
     steps:
       - name: 拉取仓库代码
         uses: actions/checkout@v4
+        with:
+          # 关键：用自己的 PAT 替换默认的 GITHUB_TOKEN
+          # 这样后续 git push 会自动继承此 token 的权限
+          token: ${{ secrets.REPO_TOKEN }}
 
       - name: 设置 Python 环境
         uses: actions/setup-python@v5
@@ -55,15 +59,10 @@ jobs:
 
       - name: 🔄 自动改写工作流文件并推送到仓库
         if: success()
-        env:
-          REPO_TOKEN: ${{ secrets.REPO_TOKEN }}
         run: |
           set -e
           NEW_CRON="${{ steps.generate_cron.outputs.NEW_CRON }}"
           WORKFLOW_FILE="${GITHUB_WORKSPACE}/.github/workflows/Alwaysdata_Renew.yml"
-
-          # 调试：确认 token 是否正确注入
-          echo "::notice::TOKEN 前8位: ${REPO_TOKEN:0:8}"
 
           # 确认文件存在
           if [ ! -f "$WORKFLOW_FILE" ]; then
@@ -87,10 +86,9 @@ jobs:
             exit 0
           fi
 
-          # 使用环境变量方式注入 token，避免 shell 转义问题
+          # checkout 时已用 PAT，此处直接 push 即可，无需再改 remote URL
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git remote set-url origin "https://x-access-token:${REPO_TOKEN}@github.com/${{ github.repository }}.git"
           git add "$WORKFLOW_FILE"
           git commit -m "🔄 自动打乱排期：更新下月 Alwaysdata 随机 Cron" \
                    -m "新排期表达式: $NEW_CRON"
