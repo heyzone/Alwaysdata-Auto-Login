@@ -2,7 +2,7 @@ name: Alwaysdata 每月随机自动续期
 on:
   workflow_dispatch: # 支持手动触发
   schedule:
-    - cron: '33 22 15 8 *'   # 👈 这个时间每次运行成功后会被脚本自动改写
+    - cron: '15 1 1 9 *'   # 👈 这个时间每次运行成功后会被脚本自动改写
 permissions:
   contents: write
   actions: write
